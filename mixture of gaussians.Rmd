@@ -1,0 +1,446 @@
+---
+title: "hw2"
+author: "masci and simsek"
+date: "16/1/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+The aim of this homework is to get familiar with different methods of model selection. By implementing from scratch our own functions we are able to observe the performance of each method in a well-specified setup - that is, the Bart density distribution.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(mixtools)
+require(optimbase)
+require(caret)
+require(KScorrect)
+```
+
+### Point 1
+In this first point we are asked to extend a given code, so that it will be possible to get a generic mixture of k Gaussians.
+
+```{r}
+handmade.em <- function(y, p, mu, sigma, n_iter, plot_flag = T)
+{
+
+  like <- p[1]*dnorm(y, mu[1], sigma[1])
+  for (i in 2:length(p)){
+    like <- like + p[i]*dnorm(y, mu[i], sigma[i])
+  }
+  
+  deviance <- -2*sum(log(like))
+  n <- length(p)
+  l <- (2+(n*3))
+  res      <- matrix(NA , n_iter + 1, l)
+  res[1,]  <- c(0, p, mu, sigma, deviance)
+  
+  for (iter in 1:n_iter) {
+    # E step
+    d <- c(p[1]*dnorm(y, mu[1], sigma[1]))
+    for (i in 2: length(p)){
+      d <- c(d, p[i]*dnorm(y, mu[i], sigma[i]))
+    }
+    d <- matrix(d, nrow = length(p), byrow = TRUE)
+    
+    r <- d[1,]/colSums(d)
+    for (i in 2: length(p)){
+      r <- array(c(r, d[i,]/colSums(d)))
+    }
+    r <- matrix(r, nrow = length(p), byrow = TRUE)
+    
+    # M step
+    
+    for (i in 1: length(p)){
+      p[i] <- mean(r[i,])
+      mu[i] <- sum(r[i,]*y)/sum(r[i,])
+      sigma[i] <- sqrt(sum(r[i,]*(y^2))/sum(r[i,]) - (mu[i])^2)
+    }
+    
+    
+    # -2 x log-likelihood (a.k.a. deviance)
+    like <- p[1]*dnorm(y, mu[1], sigma[1])
+    for (i in 2:length(p)){
+      like <- like + p[i]*dnorm(y, mu[i], sigma[i])
+    }
+    deviance <- -2*sum( log(like) )
+    
+    # Save
+    res[iter+1,] <- c(iter, p, mu, sigma, deviance)
+    
+  }
+  res <- data.frame(res)
+  out <- list(parameters = c(p = p, mu = mu, sigma = sigma), deviance = deviance, res = res)
+  return(out)
+}
+```
+
+To check whether this code works, we test it on the Bart. We initially feed random values as parameters of the function, since its goal is to find the ideal values of the parameters. In this example, we are only putting as input 4 parameters, because for the moment we simply want to see if the `handmade.em` function will work correctly and give as output 4 parameters.
+
+``` {r}
+set.seed(1314)
+XX <- rnormmix(50, 
+               lambda = c(0.5, rep(0.1,5)), 
+               mu     = c(0, ((0:4)/2)-1), 
+               sigma  = c(1, rep(0.1,5)) 
+)
+
+hem_fit <- handmade.em(XX,
+                       p = c(.6,.2,.1,.2),
+                       mu = c(-.5,0,.5,0),
+                       sigma = c(.1,.1,.1,.1),
+                       n_iter = 500)
+
+hem_fit$parameters
+
+```
+
+The `handmade.em` function works, so we can go on with our assignment.
+
+### Point 2
+Next, we have to choose two sample sizes such that one is clearly non-asymptotic and the other reasonably asymptotic. 
+
+First, we choose a small sample (n=50), create a Bart's density distribution of that size and plot the result.
+
+```{r}
+n <- 50
+set.seed(1314)
+XX <- rnormmix(n, 
+               lambda = c(0.5, rep(0.1,5)), 
+               mu     = c(0, ((0:4)/2)-1), 
+               sigma  = c(1, rep(0.1,5)) 
+)
+
+# Make an histogram of the data
+hist(XX, prob = T, col = gray(.8), border = NA, xlab = "x",
+     main = paste("Data from Bart's density",sep=""),
+     sub = paste("n = ", n, sep = ""),
+     breaks = 50)
+# Show the data points
+rug(XX, col = rgb(0,0,0,.5))
+
+# Plot the true density
+true.den = function(x) 0.5*dnorm(x, 0, 1) + 
+  0.1*dnorm(x,-1.0, 0.1) + 0.1*dnorm(x, -0.5, 0.1) +
+  0.1*dnorm(x, 0.0, 0.1) + 0.1*dnorm(x,  0.5, 0.1) +
+  0.1*dnorm(x, 1.0, 0.1)
+curve(true.den, col = rgb(1,0,0,0.4), lwd = 3, n = n , add = TRUE)
+```
+
+It is clear to see that the data available is not enough to be approximated as a true Bart distribution.
+On the other hand, for a bigger sample (n=500) we get a more satisfying result.
+
+```{r}
+n <- 500
+set.seed(1314)
+XX <- rnormmix(n, 
+               lambda = c(0.5, rep(0.1,5)), 
+               mu     = c(0, ((0:4)/2)-1), 
+               sigma  = c(1, rep(0.1,5)) 
+)
+
+# Make an histogram of the data
+hist(XX, prob = T, col = gray(.8), border = NA, xlab = "x",
+     main = paste("Data from Bart's density",sep=""),
+     sub = paste("n = ", n, sep = ""),
+     breaks = 50)
+# Show the data points
+rug(XX, col = rgb(0,0,0,.5))
+
+# Plot the true density
+true.den = function(x) 0.5*dnorm(x, 0, 1) + 
+  0.1*dnorm(x,-1.0, 0.1) + 0.1*dnorm(x, -0.5, 0.1) +
+  0.1*dnorm(x, 0.0, 0.1) + 0.1*dnorm(x,  0.5, 0.1) +
+  0.1*dnorm(x, 1.0, 0.1)
+curve(true.den, col = rgb(1,0,0,0.4), lwd = 3, n = n , add = TRUE)
+```
+
+Here the distribution is much closer to the true one, therefore can be asymptotically assumed to be a Bart's density.
+
+### Point 3
+In the following point we have to implement a number of different functions. The goal of each of these is to select the number of k components, using different methods. For this point, we will simply show the code and briefly mention what makes each method unique.
+
+#### AIC
+The Akaike information criterion is a method that aims at quantifying the difference between the log-likelihood and the bias, as shown by the formula:
+$AIC = 2k - 2\ln(\hat{L})$
+Based on this formula, it finds the model with the best prediction, without assuming that one of the models is the true one.
+
+```{r}
+aic <- function(kmax, xx, plot_  = FALSE){
+  n <- length(xx)
+  k <- kmax
+  aic_scores <- c()
+  check_aic <- 99999999
+  a=as.numeric(Sys.time())
+  for (i in 2:kmax){
+    set.seed(a)
+    p <- ones(2,10)[1,]
+    mu <- c(0, ((0:8)/2)-1)
+    sigma <- runif(10, 0.0, 2.5)
+    hem_fit <- handmade.em(xx,
+                           p = p[1:i],
+                           mu = mu[1:i],
+                           sigma = sigma[1:i],
+                           n_iter = 1000)
+    
+    MLE <- hem_fit$deviance/n
+    loglikelihood <- -n/2*(log(2*pi) + 1 +log(MLE))
+    q <- 3*i
+    AIC <- -2*loglikelihood + 2*q
+    aic_scores <- c(aic_scores, AIC)
+    if (AIC < check_aic){
+      check_aic <- AIC
+      k <- i
+    }
+  }
+  if (plot_ == TRUE){plot(c(2:kmax), aic_scores, type = "l",
+       ylab = 'AIC Scores ', xlab = 'k-values', col = 'blue')
+  text(c(2:kmax), aic_scores, round(aic_scores, 2), cex=0.6)
+  sprintf("The optimal k value is found as: %i", k)}
+  return(k)
+}
+```
+
+#### BIC
+Contrarily from AIC, in the Bayesian Information Criterion it is assumed that one of the models is the true one. The other premises are the same as Akaike's, with some differences in the formula:
+$BIC = k\ln(n) - 2\ln(\hat{L})$
+
+```{r}
+bic <- function(kmax, xx, plot_ = FALSE){
+  n <- length(xx)
+  k <- kmax
+  bic_scores <- c()
+  check_bic <- 99999999
+  a=as.numeric(Sys.time())
+  for (i in 2:kmax){
+    set.seed(a)
+    p <- ones(2,10)[1,]
+    mu <- c(0, ((0:8)/2)-1)
+    sigma <- runif(10, 0.0, 2.5)
+    hem_fit <- handmade.em(xx,
+                           p = p[1:i],
+                           mu = mu[1:i],
+                           sigma = sigma[1:i],
+                           n_iter = 1000)
+    
+    MLE <- hem_fit$deviance/n
+    loglikelihood <- -n/2*(log(2*pi) + 1 +log(MLE))
+    q <- 3*i
+    BIC <- -2*loglikelihood + log(n)*q
+    bic_scores <- c(bic_scores, BIC)
+    if (BIC < check_bic){
+      check_bic <- BIC
+      k <- i
+    }
+  }
+  
+  if(plot_ == TRUE) {plot(c(2:kmax), bic_scores, type = "l",
+       ylab = 'BIC Scores ', xlab = 'k-values', col = 'red')
+  text(c(2:kmax), bic_scores, round(bic_scores, 2), cex=0.6)
+  sprintf("The optimal k value is found as: %i", k)}
+  
+  return(k)
+}
+```
+
+#### Sample-splitting
+In sample splitting, we divide the sample in a training set and a testing set. After calculating the parameters with the training set, we choose the model with the smallest resulting deviance from the testing set.
+
+```{r}
+sample_splitting <- function(size, xx, kmax, plot_ = FALSE){
+  ## size% of the sample size
+  size <- size/100
+  smp_size <- floor(size * length(xx))
+  
+  ## set the seed to make your partition reproducible
+  train_ind <- sample(seq_len(length(xx)), size = smp_size)
+  train <- xx[train_ind]
+  test <- xx[-train_ind]
+  
+  check <- 99999999
+  k <- 0
+  deviances <- c()
+  a=as.numeric(Sys.time())
+  for (i in 2:kmax){
+  set.seed(a)
+  p <- ones(2,10)[1,]
+  mu <- c(0, ((0:8)/2)-1)
+  sigma <- runif(10, 0.000001, (max(XX)- min(XX))/2)
+  #now that we have train and test, start by finding the best parameters based on train
+  hem_fit <- handmade.em(train,
+                         p = p[1:i],
+                         mu = mu[1:i],
+                         sigma = sigma[1:i],
+                         n_iter = 1000)
+  
+  par <- hem_fit$parameters
+  #finally test those parameters on test
+  p <- par[1:i]
+  mu <- par[i+1:i]
+  sigma <- par[2*i+1:i]
+  
+  like <- p[1]*dnorm(test, mu[1], sigma[1])
+  for (j in 2:length(p)){
+    like <- like + p[j]*dnorm(test, mu[j], sigma[j])
+  }
+  deviance <- -2*sum(log(like))
+  deviances <- c(deviances, deviance)
+  if (deviance < check){
+    check <- deviance
+    k <- i
+  }
+  }
+  if(plot_ == TRUE) {plot(c(2:kmax), deviances, type = "l",
+       ylab = 'Deviance ', xlab = 'k-values', col = 'green')
+  text(c(2:kmax), deviances, round(deviances, 2), cex=0.6)
+  sprintf("The optimal k value is found as: %i", k)}
+  
+  return(k)
+}
+```
+
+#### k-fold Cross-Validation
+As in AIC, in this method it is not given for granted that one of the models is the true one. It is also similar to the previous method, in that the sample is divided in a training set and a testing set. But this time, it is actually divided into k sub-samples, with each one acting as the testing set once and the training set the other times.
+
+```{r}
+cross_validation <- function(n_fold, xx, kmax, plot_ = FALSE){
+  
+  folds <- createFolds(xx, k = n_fold, list = TRUE, returnTrain = FALSE)
+  deviances <- c()
+  a=as.numeric(Sys.time())
+  for (k in 2:kmax){
+    
+    set.seed(a)
+    p <- ones(2,10)[1,]
+    mu <- c(0, ((0:8)/2)-1)
+    sigma <- runif(10, 0.0, 2.5)
+    
+    avg_dev <- 0
+    for (f in 1:n_fold){
+      test <- xx[folds[[f]]]
+      train <- xx[-folds[[f]]]
+      
+      
+      #now that we have train and test, start by finding the best parameters based on train
+      hem_fit <- handmade.em(train,
+                             p = p[1:k],
+                             mu = mu[1:k],
+                             sigma = sigma[1:k],
+                             n_iter = 1000)
+      par <- hem_fit$parameters
+      #finally test those parameters on test
+      p <- par[1:k]
+      mu <- par[k+1:k]
+      sigma <- par[2*k+1:k]
+      
+      like <- p[1]*dnorm(test, mu[1], sigma[1])
+      for (j in 2:length(p)){
+        like <- like + p[j]*dnorm(test, mu[j], sigma[j])
+      }
+      deviance <- -2*sum(log(like))
+      avg_dev <- avg_dev + deviance
+      
+      
+    }
+    avg_dev <- avg_dev/n_fold
+    deviances <- c(deviances, avg_dev)
+  }
+  if (plot_ == TRUE) {plot(c(2:kmax), deviances, type = "l",
+       ylab = 'Deviance ', xlab = 'k-values', col = 'green')
+  text(c(2:kmax), deviances, round(deviances, 2), cex=0.6)
+  sprintf("The optimal k value is found as: %i", k)}
+  
+  return(which.min(deviances) + 1)
+  
+}
+```
+
+#### Very! raw Wasserstein
+Finally, the Wasserstein score is a measure of distance, which in this very simplified case acts as the difference between the ECDF distribution and the corresponding quantile function obtained by the testing set based on the estimators found by the training set.
+
+```{r}
+wasserstein <- function(xx, kmax){
+  #divide the sample in half
+  smp_size <- floor(.5 * length(xx))
+  train_ind <- sample(seq_len(length(xx)), size = smp_size)
+  train <- xx[train_ind]
+  test <- xx[-train_ind]
+  check <- 99999
+  k <- 0
+  
+  #use train to calculate mle
+  a=as.numeric(Sys.time())
+  for (i in 2:kmax){
+    set.seed(a)
+    p <- ones(2,10)[1,]
+    mu <- c(0, ((0:8)/2)-1)
+    sigma <- runif(10, 0.0, 2.5)
+    hem_fit <- handmade.em(train,
+                           p = p[1:i],
+                           mu = mu[1:i],
+                           sigma = sigma[1:i],
+                           n_iter = 1000)
+    MLE <- hem_fit$deviance/n
+    par <- hem_fit$parameters
+    p <- unname(par[1:i])
+    mu <- par[i+1:i]
+    sigma <- par[2*i+1:i]
+    
+    #use test to calculate ecdf and its quantile
+    e <- ecdf(test)
+    q <- quantile(test)
+    #integrate to get final score for that k
+    w <- abs(qmixnorm(e, mean=mu, sd=sigma, pro=p) - quantile(q,x))
+    w <- integrate(w, lower=0, upper=1)
+    
+    if (w<check){
+      check <- w
+      k <- i
+    }
+  }
+  return(k)
+}
+```
+
+### Point 4
+Finally, we test the performance of each of these methods given a maximum value of k=8. As for the first point, we will be using the Bart distribution to conduct our testing, since it is an interesting set-up, with known true k. We also provide plots for each of the functions, to observe the evolution of the value of the method for each k.
+
+#### AIC
+```{r}
+aic(8, XX, plot_ = TRUE)
+```
+
+#### BIC
+```{r}
+bic(8, XX, plot_ = TRUE)
+```
+
+#### Sample-splitting (50-50)
+```{r}
+sample_splitting(50, XX, 8, plot_ = TRUE)
+```
+
+#### Sample-splitting (70-30)
+```{r}
+sample_splitting(70, XX, 8, plot_ = TRUE)
+```
+
+#### Sample-splitting (30-70)
+```{r}
+sample_splitting(30, XX, 8, plot_ = TRUE)
+```
+
+#### 5-fold Cross-Validation
+```{r}
+cross_validation(5, XX, 8, plot_ = TRUE)
+```
+
+#### 10-fold Cross-Validation
+```{r}
+cross_validation(10, XX, 8, plot_ = TRUE)
+```
+
+#### Very! raw Wasserstein
+```{r}
+wasserstein(XX, 8)
+```
