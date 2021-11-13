@@ -1,0 +1,486 @@
+---
+title: "Homework 2 - SMDS2"
+author: "Leonardo Masci"
+output: html_document
+header-includes:
+- \usepackage{bbold}
+- \usepackage{hyperref}
+- \usepackage{mdframed, xcolor}
+- \usepackage{graphicx}
+- \usepackage{amsmath}
+- \mdfsetup{frametitlealignment=\center}
+- \usepackage{multirow}
+- \usepackage{bbold}
+- \usepackage{amsfonts}
+- \usepackage{mathtools}
+---
+
+## Exercise 1
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(readxl)
+require(MCMCpack)
+set.seed(31415)
+```
+
+### 1.a
+
+First of all let's import the dataset and set the dependent and independent variables.
+
+```{r warning=FALSE}
+dugong <- read_excel("dugong.xlsx", col_types = c("numeric", "numeric", "numeric"))
+x <- dugong$Age
+y <- dugong$Length
+n <- length(x)
+```
+
+Given the information provided it can be deduced that we are working in a nonconjugate framework. We can also see that there are 27 data points for the age and length variables, which are in order the independent variable and the dependent one (age=x, length=y).
+
+```{r}
+plot(x, y, main="Data set", xlab="Age", ylab="Length", pch=20, col="turquoise")
+```
+
+Plotting them together we obtain the plot above, which looks like we would expect given that we are working with a non linear regression model, given that $Y_i\sim N(\mu_i, \tau^2)$ where $\mu_i = f(x_i) = \alpha - \beta \gamma ^{x_i}$.
+
+
+The parameters we are working with are $\alpha, \beta, \gamma, \tau^2$ and we know all of their prior distributions already. To sum up their relationships, we have that $Y_i$ depends on $\mu_i, \tau^2$, the first of which depends on $x_i, \alpha, \beta, \gamma$.
+
+### 1.b
+
+As a consequence, the corresponding likelihood function is as follows:
+
+Since
+
+\begin{equation}
+L(y_i|\mu_i, \tau^2) = \frac{1}{\sqrt{2 \pi \tau^2}}exp \bigg(-\frac{1}{2} \frac{(y_i - \mu_i)^2}{\tau^2} \bigg)
+\end{equation}
+
+Then 
+
+\begin{equation}
+L(\alpha, \beta, \gamma, \tau^2|x, y) = \prod_{i=1}^{n} \frac{1}{\sqrt{2 \pi \tau^2}} exp \bigg(-\frac{1}{2} \frac{(y_i - \mu_i)^2}{\tau^2} \bigg)I_{(1, \infty)}(\alpha)I_{(1, \infty)}(\beta)I_{(0,1)}(\gamma)I_{(0,\infty)}(\tau^2)
+\end{equation}
+
+\begin{equation}
+L(\alpha, \beta, \gamma, \tau^2|x, y) = \frac{1}{\sqrt{2 \pi \tau^2}^n} exp \bigg(-\frac{1}{2 \tau^2} \sum_{i=1}^{n} (y_i - \alpha + \beta \gamma^{x_i})^2 \bigg)I_{(1, \infty)}(\alpha)I_{(1, \infty)}(\beta)I_{(0,1)}(\gamma)I_{(0,\infty)}(\tau^2)
+\end{equation}
+
+### 1.c 
+
+Defining $\theta$ as the collection of parameters and given that we already know all of the prior distributions of the single parameters and that they are all independent from each other, then their joint prior distribution is simply:
+
+\begin{equation}
+\pi(\theta) = \pi(\alpha) \pi(\beta) \pi(\gamma) \pi(\tau^2) =
+\frac{1}{\sqrt{2 \pi \sigma_{\alpha}^2}}exp{\bigg(-\frac{\alpha^2}{2\sigma_{\alpha}^2}}\bigg) \frac{1}{\sqrt{2 \pi \sigma_{\beta}^2}}exp{\bigg(-\frac{\beta^2}{2\sigma_{\beta}^2}} \bigg) I_{(0,1)}(\gamma) \frac{b^a}{\Gamma(a)}\tau^{2(-\alpha -1)}exp{\bigg(-\frac{b}{\tau^2}\bigg)} \\
+\propto exp{\bigg(-\frac{\alpha^2}{2\sigma_{\alpha}^2} -\frac{\beta^2}{2\sigma_{\beta}^2}} \bigg) I_{(0,1)}(\gamma) \tau^{2(-\alpha -1)}exp{\bigg(-\frac{b}{\tau^2}\bigg)}
+\end{equation}
+
+Finally we choose some values for these hyperparameters, so that it will be possible to proceed with the calculations. the values are chosen in this manner:
+
+\begin{equation}
+\alpha \sim N(0, 10000) \\
+\beta \sim N(0, 10000) \\
+\gamma \sim Unif(0,1) \\
+\tau^2 \sim IG(.001, .001)
+\end{equation}
+
+```{r warning=FALSE}
+sigmaa <- 10000
+sigmab <- 10000
+a <- .001
+b <- .001
+```
+
+### 1.d
+
+Now let's derive the functional form for all full-conditionals, starting with $\alpha$:
+
+\begin{equation}
+\pi(\alpha|\beta, \gamma, \tau^2, x, y) = \frac{1}{\sqrt{2 \pi \tau^2}^n} exp \bigg(-\frac{1}{2 \tau^2} \sum_{i=1}^{n} (y_i - \alpha + \beta \gamma^{x_i})^2 \bigg) \frac{1}{\sqrt{2 \pi \sigma_{\alpha}^2}} exp \bigg(-\frac{\alpha^2}{2\sigma_{\alpha}^2}\bigg) I_{(1, \infty)}(\alpha) \\
+\propto exp \bigg(-\frac{1}{2 \tau^2} \sum_{i=1}^{n} (y_i - \alpha + \beta \gamma^{x_i})^2 \bigg) exp \bigg(-\frac{\alpha^2}{2\sigma_{\alpha}^2}\bigg) I_{(1, \infty)}(\alpha)
+\propto exp \bigg(-\frac{1}{2 \tau^2} \sum_{i=1}^{n} (\alpha^2 - 2\alpha y_i -2\alpha \beta \gamma^{x_i}) -\frac{\alpha^2}{2\sigma_{\alpha}^2} \bigg) I_{(1, \infty)}(\alpha) \\
+\propto exp \bigg( - \frac{2\alpha \sigma_{\alpha}^2 \sum_{i=1}^{n} (y_i + \beta \gamma^{x_i}) + \alpha^2(\tau^2 + n\sigma_{\alpha}^2)}{2 \sigma_{\alpha}^2 \tau^2} \bigg) I_{(1, \infty)}(\alpha)
+\propto exp \bigg(-\alpha \frac{\sigma_{\alpha}^2 \sum_{i=1}^n (y_i +\beta \gamma^{x_i})}{\sigma_{\alpha}^2 \tau^2} -\frac{\alpha^2}{2} \frac{\tau^2 +n \sigma_{\alpha}^2}{\sigma_{\alpha}^2 \tau^2} \bigg) I_{(1, \infty)}(\alpha)
+\end{equation}
+
+for $\beta$ we have that:
+
+\begin{equation}
+\pi(\beta|\alpha, \gamma, \tau^2, x, y) = \frac{1}{\sqrt{2 \pi \tau^2}^n} exp \bigg(-\frac{1}{2 \tau^2} \sum_{i=1}^{n} (y_i - \alpha + \beta \gamma^{x_i})^2 \bigg) \frac{1}{\sqrt{2 \pi \sigma_{\beta}^2}} exp \bigg(-\frac{\beta^2}{2\sigma_{\beta}^2}\bigg) I_{(1, \infty)}(\beta) \\
+\propto exp \bigg(-\frac{1}{2 \tau^2} \sum_{i=1}^{n} (y_i - \alpha + \beta \gamma^{x_i})^2 \bigg) exp \bigg(-\frac{\beta^2}{2\sigma_{\beta}^2}\bigg) I_{(1, \infty)}(\beta)
+\propto exp \bigg(-\frac{1}{2 \tau^2} \sum_{i=1}^{n} (\beta^2 \gamma^{2x_i} - 2\beta y_i \gamma^{x_i} -2\alpha \beta \gamma^{x_i}) -\frac{\beta^2}{2\sigma_{\beta}^2} \bigg) I_{(1, \infty)}(\beta) \\
+\propto exp \bigg(- \frac{2 \beta \gamma_{\beta}^2 \sum_{i=1}^n \gamma^{x_i} (\alpha - y_i) + \beta^2 (\tau^2 + \sigma_{\beta}^2 \sum_{i=1}^n \gamma^{2 x_i})}{2 \sigma_{\beta}^2 \tau^2} \bigg) I_{(1, \infty)}(\beta) \\
+\propto exp \bigg(- \beta \frac{\sigma_{\beta}^2 \sum_{i=1}^n \gamma^{x_i} (\alpha - y_i)}{\sigma_{\beta}^2 \tau^2} - \frac{\beta^2}{2} \frac{\tau^2 + \sigma_{\beta}^2 \sum_{i=1}^n \gamma^{2 x_i}}{\sigma_{\beta}^2 \tau^2} \bigg) I_{(1, \infty)}(\beta)
+\end{equation}
+
+for $\gamma$ the full conditional is:
+
+\begin{equation}
+\pi(\gamma|\alpha, \beta, \tau^2, x, y) = \frac{1}{\sqrt{2 \pi \tau^2}^n} exp \bigg(- \frac{1}{2 \tau^2} \sum_{i=1}^n (y_i -\alpha + \beta \gamma^{x_i})^2 \bigg) I_{(0, 1)}(\gamma) \\
+\propto exp \bigg(- \frac{1}{2 \tau^2} \sum_{i=1}^n (y_i -\alpha + \beta \gamma^{x_i})^2 \bigg) I_{(0, 1)}(\gamma)
+\end{equation}
+
+and finally for $\tau^2$:
+
+\begin{equation}
+\pi(\tau^2 | \alpha, \beta, \gamma, x, y) = \frac{1}{\tau^{2(\frac{n}{2})} \tau^{2(a +1)}} exp \bigg(\frac{-\frac{1}{2} \sum_{i=1}^n (y_i - \alpha + \beta \gamma^{x_i})^2 - b}{\tau^2} \bigg) I_{(0, \infty)}(\tau^2) =\\
+= \frac{1}{\tau^{2(\frac{n}{2}+a+1)}} exp \bigg(- \frac{b + \frac{1}{2} \sum_{i=1}^n (y_i - \alpha - \beta \gamma^{x_i})^2}{\tau^2} \bigg)I_{[0, 1]}(\tau^2)
+\end{equation}
+
+### 1.e
+
+Given the prior point, we recognise the following standard parametric families:
+
+$\alpha$ distribution
+
+\begin{equation}
+\pi(\alpha|\beta, \gamma, \tau^2, x, y) \sim N_{(1, \infty)} \bigg(\frac{\sigma_{\alpha}^2 \sum_{i=1}^n (y_i + \beta \gamma^{x_i})}{\tau^2 + n \sigma_{\alpha}^2}, \frac{\sigma_{\alpha}^2 \tau^2}{\tau^2 +n \sigma_{\alpha}^2} \bigg)
+\end{equation}
+
+$\beta$ distribution 
+
+\begin{equation}
+\pi(\beta|\alpha, \gamma, \tau^2, x, y) \sim N_{(1, \infty)} \bigg(\frac{\sigma_{\beta}^2 \sum_{i=1}^n \gamma^{x_i} (\alpha - y_i)}{\tau^2 + \sigma_{\beta}^2 \sum_{i=1}^n \gamma^{2x_i}}, \frac{\sigma_{\beta}^2 \tau^2}{\tau^2 + \sigma_{\beta}^2 \sum_{i=1}^n \gamma^{2x_i}}\bigg)
+\end{equation}
+
+$\tau^2$ distribution
+
+\begin{equation}
+\pi(\tau^2 | \alpha, \beta, \gamma, x, y) \sim IG_{(0, \infty)} \bigg(a + \frac{n}{2}, b + \frac{1}{2} \sum_{i=1}^n (y_i - \alpha + \beta \gamma^{x_i})^2 \bigg)
+\end{equation}
+
+No standard parametric family can be identified for $\gamma$.
+
+### 1.f
+
+First of all, we initiate the vectors of values and choose initial values.
+
+```{r}
+t <- 10000
+alpha <- rep(NA, t+1)
+beta <- rep(NA, t+1)
+gamma <- rep(NA, t+1)
+tau2 <- rep(NA, t+1)
+
+alpha[1] <- 2.6
+beta[1] <- 1
+gamma[1] <- .85
+tau2[1] <- .001
+```
+
+Since no standard distribution is known for $\gamma$ a different solution has to be found to simulate its values. Here, we implement a Metropolis-Hastings algorithm.
+
+```{r}
+full_conditional <- function(alpha, beta, gamma, tau2){
+  return(exp(-1/(2*tau2)*sum((y-alpha+beta*gamma^x)^2)))
+}
+```
+
+Having all of the distributions we can proceed with the markov chain.
+
+```{r warning=FALSE}
+for(i in 1:t){
+  alpha[i+1] <- rnorm(1, (sigmaa * sum(y + beta[i] * (gamma[i] ^ x))) / (tau2[i] + n * sigmaa), sqrt((sigmaa * tau2[i]) / (tau2[i] + n * sigmaa)))
+  
+  beta[i+1] <- rnorm(1, (sigmab * sum((gamma[i] ^ x) * (alpha[i+1] - y))) / (tau2[i] + sigmab * sum(gamma[i] ^ (2 * x))), sqrt((sigmab * tau2[i]) / (tau2[i] + sigmab * sum(gamma[i] ^ (2 * x)))))
+  
+  g <- runif(1, 0, 1)
+  p <- full_conditional(alpha[i+1], beta[i+1], g, tau2[i]) / full_conditional(alpha[i+1], beta[i+1], gamma[i], tau2[i])
+  if(runif(1, 0, 1)<=p){
+    gamma[i+1] <- g
+  } else {
+    gamma[i+1] <- gamma[i]
+  }
+  
+  tau2[i+1] <- rinvgamma(1, a + n/2, b + .5 * sum((y - alpha[i+1] + beta[i+1] * (gamma[i+1]^x))^2))
+}
+```
+
+Finally, we put everything together and visualise the first few results.
+
+```{r}
+MG <- cbind(alpha, beta, gamma, tau2)
+head(MG)
+```
+
+### 1.g
+
+Let's visualise the trace-plots of the simulations of each parameter.
+
+```{r}
+plot(alpha, main="Alpha", xlab="Iteration", ylab="Alpha", pch=20, col="turquoise")
+plot(beta, main="Beta", xlab="Iteration", ylab="Beta", pch=20, col="orange")
+plot(gamma, main="Gamma", xlab="Iteration", ylab="Gamma", pch=20, col="limegreen")
+plot(tau2, main="Tau squared", xlab="Iteration", ylab="Tau squared", pch=20, col="orchid")
+```
+
+### 1.h
+
+Next, we compare their empirical averages to the mean of each distribution and visualise it.
+
+```{r}
+plot(cumsum(alpha)/(1:length(alpha)), main="Alpha", xlab="Iteration", ylab="Alpha", pch=20, col="turquoise")
+abline(h=mean(alpha), col="red")
+plot(cumsum(beta)/(1:length(beta)), main="Beta", xlab="Iteration", ylab="Beta", pch=20, col="orange")
+abline(h=mean(beta), col="red")
+plot(cumsum(gamma)/(1:length(gamma)), main="Gamma", xlab="Iteration", ylab="Gamma", pch=20, col="limegreen")
+abline(h=mean(gamma), col="red")
+plot(cumsum(tau2)/(1:length(tau2)), main="Tau squared", xlab="Iteration", ylab="Tau squared", pch=20, col="orchid", ylim=c(.0095, .0105))
+abline(h=mean(tau2), col="red")
+```
+
+### 1.i
+
+As an estimate of each parameter we can simply employ the mean values.
+
+```{r}
+alpha_hat <- mean(alpha)
+beta_hat <- mean(beta)
+gamma_hat <- mean(gamma)
+tau2_hat <- mean(tau2)
+alpha_hat
+beta_hat
+gamma_hat
+tau2_hat
+```
+
+Which have an approximation error:
+
+\begin{equation}
+E[(\hat{I_n} - I)^2] = V[\hat{I_n}] = \frac{1}{n} V[h(X)] = \frac{1}{n} \bigg(E_{\pi}[h(X)^2] - E_{\pi}[h(X)]^2 \bigg) = \frac{k}{n}
+\end{equation}
+
+where k is unknown but can be estimated as follows
+
+\begin{equation}
+\hat{k} = \hat{V}[h(x)] = \frac{1}{n} \sum_{i=1}^n h(X_i)^2 - \hat{I_n}^2
+\end{equation}
+
+So we can proceede with the approximation error of each parameter:
+
+```{r}
+alpha_error <- (var(alpha)/10001)
+beta_error <- (var(beta)/10001)
+gamma_error<- (var(gamma)/10001)
+tau2_error <- (var(tau2)/10001)
+alpha_error
+beta_error
+gamma_error
+tau2_error
+```
+
+### 1.l
+
+In order to measure the posterior uncertainty we can simply use the ratio of the two previous parameters:
+
+```{r}
+alpha_mpu <- sqrt(alpha_error)/alpha_hat
+beta_mpu <- sqrt(beta_error)/beta_hat
+gamma_mpu <- sqrt(gamma_error)/gamma_hat
+tau2_mpu <- sqrt(tau2_error)/tau2_hat
+alpha_mpu
+beta_mpu
+gamma_mpu
+tau2_mpu
+max(c(alpha_mpu, beta_mpu, gamma_mpu, tau2_mpu))
+```
+
+Therefore $\tau^2$ has the largest posterior uncertainty, at 0.003152903.
+
+### 1.m
+
+The correlations between the parameters can easily be found in R:
+
+```{r}
+correlation <- cor(MG)
+correlation
+```
+
+And so we find that the largest correlation is between $\alpha$ and $\gamma$ at 0.82568372.
+
+### 1.n
+
+we are asked to use Markov Chain to approximate the posterior predictive distribution of y given x=20.
+
+```{r}
+ppd20 <- rep(NA, t)
+
+for(i in 1:t){
+  ppd20[i] <- rnorm(1, alpha[i] - beta[i]*(gamma[i]^20), sqrt(tau2[i]))
+}
+
+mean(ppd20)
+```
+
+As a result we get a prediction for dugongs' expected length at age 20 equal to 2.588871 metres.
+
+### 1.o
+
+For age 30 we can repeat the same process, changing only the value of x.
+
+```{r}
+ppd30 <- rep(NA, t)
+
+for(i in 1:t){
+  ppd30[i] <- rnorm(1, alpha[i] - beta[i]*(gamma[i]^30), sqrt(tau2[i]))
+}
+
+mean(ppd30)
+```
+
+In conclusion, we find that the expected value for length at age 30 2.629388 metres, and so it is greater than that at age 20. This makes sense since we expect an older dugong to have grown more than a younger one, since the first had more time to do so compared to the second.
+
+### 1.p
+
+In order to compare the precisions they must first be computed, which is a quick process:
+
+```{r}
+prec20 <- 1/var(ppd20)
+prec30 <- 1/var(ppd30)
+prec20
+prec30
+```
+
+This means that the prediction is much more precise for x=20.
+
+## Exercise 2
+
+### 2.a
+
+Let us start with the initial set up: the transition probability matrix can be computed as follows
+
+```{r}
+script_S=c(1,2,3) 
+tpm<-matrix(c(0,.5,.5,5/8,1/8,.25,2/3,1/3,0),nrow=3,byrow=T)
+tpm
+```
+
+So then given a starting time of 0 and initial state $X_0 = 1$, the simulation for 1000 iterations is
+
+```{r}
+x0 <- 1
+nsample <- 1000
+chain<-rep(NA,nsample+1) 
+chain[1]<-x0
+
+for(t in 1:nsample){
+  chain[t+1]<-sample(script_S,size=1,prob=tpm[chain[t],])
+}
+
+table(chain)
+```
+
+### 2.b
+
+Therefore, the empirical relative frequency is simply
+
+```{r}
+prop.table(table(chain))
+barplot(prop.table(table(chain)), col="orange", main="relative frequency of the 3 states", names.arg = c("1", "2", "3"))
+```
+
+### 2.c
+
+Next, we take the previous simulation and repeat it an extra 500 times, recording only the final state of each run.
+
+```{r}
+nsimulations <- 500
+newchain <- rep(NA,nsimulations)
+nsample <- 1000
+
+for(i in 1:nsimulations){
+  chain<-rep(NA,nsample+1) 
+  chain[1]<-x0
+  
+  for(t in 1:nsample){
+    chain[t+1]<-sample(script_S,size=1,prob=tpm[chain[t],])
+  }
+  
+  newchain[i] <- chain[nsample+1]
+}
+
+table(newchain)
+```
+
+Let's also compute the relative frequencies as we did before and plot them together with the previous ones to visualise the difference.
+
+```{r}
+prop.table(table(newchain))
+sims <- rbind(prop.table(table(chain)), prop.table(table(newchain)))
+barplot(sims, col=c("orange", "turquoise"), main="comparing the relative frequency of the 3 states", names.arg = c("1", "2", "3"), beside=TRUE, legend=c("first simulation", "second simulation"), ylim=c(0,0.5))
+```
+
+The big difference between the two is that the second one is not properly a markov chain, since each value does not depend on the previous one as they come from different simulations altogether. 
+
+Nevertheless, the results of the distribution should be an approximation of the stationary distribution, as will be seen in the next point.
+
+### 2.d
+
+Theoretical stationary distribution $\pi$ can be obtained by solving the following system of equations:
+
+\begin{equation}
+\begin{cases}
+\pi_1 p_{11} + \pi_2 p_{21} + \pi_3 p_{31} = \pi_1 \\
+\pi_1 p_{12} + \pi_2 p_{22} + \pi_3 p_{31} = \pi_2 \\
+\pi_1 p_{13} + \pi_2 p_{23} + \pi_3 p_{33} = \pi_3 
+\end{cases}
+\end{equation}
+
+in which the stationary distribution is $\pi = (\pi_1, \pi_2, \pi_3)^T$ such that the system above is satisfied. In matrix notation that would be equal to $P^T\pi=\pi$ and so $\pi$ must solve system of equation:
+
+\begin{equation}
+(P^T - \lambda I) \pi = 0
+\end{equation}
+
+in which eigenvalue $\lambda$ is equal to 1 and $\pi_1 + \pi_2+\pi_3=1$.
+
+A quicker method to be implemented in R is to simply multiply the matrix by itself until it converges:
+
+```{r}
+tpm2 <- tpm
+for(i in 1:100){
+  tpm2 <- tpm2 %*% tpm
+}
+tpm2
+```
+
+So the solving values are 0.3917526, 0.3298969 and 0.278350.
+
+### 2.e
+
+To check whether it is well approximated by the previous simulated empirical relvative frequencies, we can simply plot the three together and look at the results.
+
+```{r}
+p <- tpm2[1,]
+sims <- rbind(sims, p)
+barplot(sims, col=c("orange", "turquoise", "chartreuse"), main="comparison", names.arg = c("1", "2", "3"), beside=TRUE, legend=c("first simulation", "second simulation", "stationary distribution"), ylim=c(0,0.5))
+```
+
+It can be concluded that the simulations do a pretty good job in approximating this distribution, as the values are pretty similar.
+
+### 2.f
+
+Starting at state 2 instead of state 1 should not yield different results, because of the ergodic property. Nonetheless, simply conducting another simulation should confirm this theory.
+
+```{r}
+x0 <- 2
+nsample <- 1000
+chain2<-rep(NA,nsample+1) 
+chain2[1]<-x0
+
+for(t in 1:nsample){
+  chain2[t+1]<-sample(script_S,size=1,prob=tpm[chain[t],])
+}
+
+table(chain2)
+```
+
+Once again, we plot the results to compare the differences:
+
+```{r}
+chains <- rbind(prop.table(table(chain)), prop.table(table(chain2)))
+barplot(chains, col=c("orange", "turquoise"), main="comparing different starting states", names.arg = c("1", "2", "3"), beside=TRUE, legend=c("x0 = 1", "x0 = 2"), ylim=c(0,0.5))
+```
+
+The results are indeed pretty similar.

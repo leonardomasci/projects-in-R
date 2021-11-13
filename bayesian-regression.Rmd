@@ -1,0 +1,400 @@
+---
+title: "report"
+author: "Leonardo Masci"
+date: "28/7/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+require(tidyverse)
+require(magrittr)
+require(R2jags)
+require(mcmcse)
+require(bayesplot)
+require(TeachingDemos)
+require(msm)
+require(corrplot)
+```
+
+### introduction
+
+This project deals with a bayesian regression task for the binary classification of a fictional dataset of students. The aim is to classify whether a student will get a passing grade in all of their tests based on some feature variables, properly illustrated later in this report. This analysis is carried out through a Bayesian non-conjugate regression model, for which diagnostics and further insights are provided, along with a model correctness assessment by means of simulations and the comparison with another candidate model.
+
+### illustration of the dataset
+
+The dataset contains 8 variables: race/ethinicity is dropped as it is ambiguous.
+
+```{r}
+df <- read_csv("StudentsPerformance.csv")
+N <- length(df$`math score`)
+m <- df$`math score`
+r <- df$`reading score`
+w <- df$`writing score`
+prep <- df$`test preparation course`
+lunch <- df$lunch
+gender <- df$gender
+```
+
+The grades in the three subjects available in the dataset are distributed as follows:
+
+```{r}
+plot(table(m), type="l", col="turquoise", xlim=c(24,100),
+     xlab="grades", ylab="frequency", main="grade distribution in different subjects")
+lines(table(r), type="l", col="orange")
+lines(table(w), type="l", col="lightgreen")
+legend(89,36,c("math","reading","writing"),
+       col=c("turquoise","orange","lightgreen"),
+       lty=1, pch=3)
+```
+
+```{r}
+mstats <- c(min(m), quantile(m, probs=.25), median(m), mean(m), quantile(m, probs=.75), max(m))
+mstats
+rstats <- c(min(r), quantile(r, probs=.25), median(r), mean(r), quantile(r, probs=.75), max(r))
+rstats
+wstats <- c(min(w), quantile(w, probs=.25), median(w), mean(w), quantile(w, probs=.75), max(w))
+wstats
+```
+
+while the following barplots can be observed for the binary feature variables
+
+```{r}
+barplot(table(prep), col=c(2,3))
+barplot(table(lunch), col=c(4,7))
+```
+
+### preprocessing
+
+A new target variable is defined: "pass", which is a binary variable that indicates whether a student has passed all three tests or not. 
+
+```{r}
+t <- rep(0,N)
+l <- rep(0,N)
+g <- rep(0,N)
+pass <- rep(0,N)
+for (i in 1:N){
+  if (m[i]>59 && r[i]>59 && w[i]>59){
+    pass[i] <- 1
+  } 
+  if (prep[i]=="completed"){
+    t[i] <- 1
+  } 
+  if (lunch[i]=="standard"){
+    l[i] <- 1
+  } 
+  if(gender[i]=="male"){
+    g[i] <- 1
+  }
+}
+
+table(pass)
+dat <- cbind(pass,m,r,w,t,l,g)
+dat <- as.data.frame(dat)
+```
+
+then, the correlations among the variables are visualised, to see dependency between the target variable and the features
+
+```{r}
+corrplot(cor(dat), type="lower", method="number", diag=FALSE)
+```
+
+From this, it becomes apparent that attending the preparation course does not have as much of a correlation with passing as coming from a higher class family (whose children do not have a free or reduced lunch) and that gender has no impact at all on passing - for this reason, the variable "gender" is dropped.
+
+at the end of this section, the final dataset comprises the target variable "pass" along with 5 feature variables (math, writing, reading, lunch and preparatory course)
+
+### frequentist approach
+
+the task is first looked at from a frequentist point of view, from which many things can be obtained - the p values associated to each variable is indeed valuable.
+
+```{r}
+frequentist <- glm(pass ~ m + w + r + t + l + g, family = binomial(link = "logit"), data = dat)
+summary(frequentist)
+```
+
+### model choice
+
+logistic regression model with logit link function
+prior beta distributions N($\mu$=0, $\tau^2$=.0001)
+
+$$
+Y \sim Bin(1, \pi)
+$$
+$$
+logit(\pi) = x \beta
+$$
+$$
+\beta_i \sim N(0, 0.0001)
+$$
+
+```{r}
+model <- function() {
+  # Likelihood
+  for(i in 1:N)
+  {
+    pass[i] ~ dbinom(p[i], 1)
+    # link function (logit)
+    logit(p[i]) <- beta[1] + inprod(beta[2:d], x[i,]) 
+  }
+  
+  # Priors - cauchy
+  for (j in 1:d){
+    beta[j] ~ dnorm(0, .0001)
+  }
+}
+```
+
+firstly the data has to be prepared. a function is created ad hoc for a specific reason later on in this report.
+
+```{r}
+apply_data <- function(x, pass){
+  N <- nrow(x)
+  d <- ncol(x) + 1
+  dat.jags <- list("pass", "N", "x", "d")
+  mod.params <- c("beta")
+  mod.inits <- function(){
+    list("beta"= rnorm(d, 0, 1/10000))
+  }
+  
+  mod.fit <- jags(data=dat.jags, model.file=model, 
+                  inits=mod.inits, parameters.to.save=mod.params,
+                  n.chains=3, n.iter=10000, n.burnin=1000, n.thin=10)
+  print(mod.fit$BUGSoutput)
+}
+```
+
+### create simulated data
+
+before proceeding any further, it is important to make sure that the model retrieves the right parameters - so simulate fake data that follows such distribution.
+
+```{r}
+set.seed(31415)
+n <- 500
+mathsim <- rtnorm(n, mean=mean(m), sd=sd(m), lower=min(m), upper=100)
+writesim <- rtnorm(n, mean=mean(w), sd=sd(w), lower=min(w), upper=100)
+readsim <- rtnorm(n, mean=mean(r), sd=sd(r), lower=min(r), upper=100)
+prepsim <- sample(c(1,0), n, replace=T)
+lunchsim <- sample(c(1,0), n, replace=T)
+
+beta0 <- -45
+beta1 <- .26
+beta2 <- .19
+beta3 <- .21
+beta4 <- .07
+beta5 <- .13
+
+linpred <-  beta0 + beta1*(mathsim) + beta2*(writesim) + beta3*(readsim) + beta4*(prepsim) + beta5*(lunchsim)
+
+pis <- exp(linpred)/(1+exp(linpred))
+#unique(pis)
+
+r <- rbinom(N, 1, pis)
+table(r)
+
+datsim <- data.frame(pass=r, m=mathsim, w=writesim, r=readsim, 
+                  prep=prepsim, lunch=lunchsim)
+```
+
+### test model on simulated data
+
+```{r}
+pass.sim <- as.vector(datsim$pass)
+x <- datsim %>% select(c("m","w","r","prep","lunch"))
+apply_data(x, pass=pass.sim)
+```
+
+### test model on real data
+
+finally, apply it to many combinations
+
+```{r}
+combos <- list(c("m","w","r"), c("m","w","r","t"),
+               c("m","w","r","l"),
+               c("m","w","r","t","l"))
+models <- list()
+pass <- as.vector(dat$pass)
+
+for (i in 1:length(combos)){
+  print(combos[[i]])
+  x <- dat %>% select(combos[[i]])
+  apply_data(x, pass) 
+}
+```
+
+so in conclusion the best model is math, writing and reading, with a DIC of 344 -> use those parameters for the diagnostics
+
+### diagnostics
+
+```{r}
+pass <- as.vector(dat$pass)
+N <- nrow(dat)
+x <- dat %>% select(c("m","r","w"))
+d <- ncol(x) + 1
+
+dat.jags <- list("pass", "N", "x", "d")
+mod.params <- c("beta")
+mod.inits <- function(){
+  list("beta"= rnorm(d, 0, 1/10000))
+}
+
+mod.fit <- jags(data=dat.jags, model.file=model, 
+                inits=mod.inits, parameters.to.save=mod.params,
+                n.chains=3, n.iter=10000, n.burnin=1000, n.thin=10)
+chainArray <- mod.fit$BUGSoutput$sims.array
+```
+
+univariate trace-plots of the simulations of each parameter
+
+```{r}
+traceplot(mod.fit)
+```
+
+trace-plots for each chain
+
+```{r}
+bayesplot::mcmc_combo(chainArray)
+```
+
+autocorrelation of each parameter, ideally this would be close to 0
+
+```{r}
+coda.fit <- coda::as.mcmc(mod.fit)
+coda::acfplot(coda.fit)
+coda::autocorr.diag(coda.fit)
+```
+
+the Raftery and Lewis’s diagnostic  The algorithm looks for the smallest thinning interval k that makes Zt (a binarization of the chain) behave as if it came from an independent 2-state Markov chain (the output of the diagnostic is the minimum sample size that is needed to achieve this). basically, it estimates the number of iterations needed to reach a certain level of precision in posterior samples
+
+```{r}
+coda::raftery.diag(coda.fit)
+```
+
+The Geweke diagnostic looks at the Markov chain as if it were a time series in order to check for stationarity. The diagnostic takes into account two disjoint segments of the posterior samples of the Markov chain and compares their means to assess convergence.
+
+```{r}
+coda::geweke.plot(coda.fit)
+```
+
+since the plots show that the values of the Z-score are almost always within the acceptance region, the hypothesis of convergence cannot be discarded with p-value 0.05
+
+The `potential scale reduction factor’ is calculated for each variable in x, with upper and lower confidence limits. Approximate convergence is diagnosed when the upper limit is close to 1. 
+
+```{r}
+coda::gelman.diag(coda.fit)
+```
+
+The Heidelberger and Welch diagnostic assesses the convergence by testing the null hypothesis (p-value 0.05) that the samples of the Markov chain are drawn from a stationary distribution. then, the half-width test calculates a 95% confidence interval for the mean, using the portion of the chain which passed the stationarity test, and compares it to the actual mean.
+
+```{r}
+coda::heidel.diag(coda.fit)
+```
+
+### credible intervals
+
+having established that the mcmc converges as it should, the credible intervals and the point estimates for the beta values are implemented.
+
+point estimates
+
+```{r}
+chainMat <- mod.fit$BUGSoutput$sims.matrix
+beta.hat.jags <- colMeans(chainMat)
+beta.hat.jags
+```
+
+credible intervals
+
+```{r}
+cred <- 0.95
+p.ET.jags <- apply(chainMat, 2, quantile, 
+                    prob=c((1-cred)/2, 1-(1-cred)/2))
+p.ET.jags
+```
+
+highest density region
+
+```{r}
+p.HPD.jags <- coda::HPDinterval(as.mcmc(chainMat))
+p.HPD.jags
+```
+
+### other model
+
+here, hierarchical modelling of the variance for the β parameter is introduced, which is the main difference with previous model 
+
+normal hierarchical regression model describes the across-group heterogeneity with a multivariate normal model. the multivariate normal distribution for βi,is not a prior distribution representing uncertainty about a fixed but unknown quantity, but rather, it is a sampling distribution representing heterogeneity among a collection of objects.
+
+$$
+Y \sim Bin(1, \pi)
+$$
+$$
+logit(\pi) = x \beta
+$$
+$$
+\beta_i \sim N(0, \tau)
+$$
+$$
+\tau \sim Gamma(0.0001, 0.0001)
+$$
+
+
+```{r}
+model.two <- function() {
+  # Likelihood
+  for(i in 1:N)
+  {
+    pass[i] ~ dbinom(p[i], 1)
+    # link function (logit)
+    logit(p[i]) <- beta[1] + inprod(beta[2:d], x[i,]) 
+  }
+  
+  # priors
+  for (j in 1:d){
+    beta[j] ~ dnorm(0, tau)
+  }
+  tau ~ dgamma(.0001, .0001)
+}
+```
+
+```{r}
+pass <- as.vector(dat$pass)
+N <- nrow(dat)
+x <- dat %>% select(c("m","r","w"))
+d <- ncol(x) + 1
+
+dat.jags <- list("pass", "N", "x", "d")
+mod.params <- c("beta")
+mod.inits <- function(){
+  list("beta"= rnorm(d, 0, 1/10000))
+}
+
+mod.fit.two <- jags(data = dat.jags,                                   
+                model.file = model.two, inits = mod.inits,          
+                parameters.to.save = mod.params,                  
+                n.chains = 3, n.iter = 10000, n.burnin = 1000, n.thin=10) 
+mod.fit.two$BUGSoutput
+```
+
+same diagnostics as before
+
+```{r}
+traceplot(mod.fit)
+
+chainArray <- mod.fit.two$BUGSoutput$sims.array
+
+bayesplot::mcmc_combo(chainArray)
+
+coda.fit <- coda::as.mcmc(mod.fit.two)
+
+coda::acfplot(coda.fit)
+
+coda::raftery.diag(coda.fit)
+
+coda::geweke.plot(coda.fit)
+
+coda::gelman.diag(coda.fit)
+
+coda::heidel.diag(coda.fit)
+```
+
+### comparing the two models
+
+looking at the DICs of the two models, it can be stated that the normal hierarchical model is a better fit than the logistic regression.

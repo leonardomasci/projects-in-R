@@ -1,0 +1,250 @@
+---
+title: "Statistical Methods in Data Science II - Homework 1"
+author: "Leonardo Masci"
+date: "24/4/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+set.seed(1234)
+load("C:/Users/User/Desktop/smds2/hw1/2021_homework_01.RData")
+```
+
+## Fully Bayesian conjugate analysis of Rome car accidents
+
+We are given the following dataset containing data on car accidents happened in Rome in the year 2016:
+
+```{r}
+mydata <- subset(roma,subset=sign_up_number==104)
+str(mydata)
+```
+
+In it, `car_accidents` is our $Y_i=y_i$ and knowing that the average number of hourly car accidents is 3.22.
+
+### Point 1
+
+Let's start by better describing the dataset. From the results above we know that the data is always related to saturdays at 9, and that we have 19 total observations. Moreover, the number of the weeks are consecutive, going from 2 to 20 and the `sign_up_number` columns always displays the same value (104), as that is the condition over which we subsetted the entire dataset.
+
+For this reason, we focus on the `car_accidents` column, which will be the focus of our analysis.
+
+```{r}
+barplot(table(factor(mydata$car_accidents, levels=1:8)), main = "Number of Car Accidents", ylab = "number of days", xlab = "amount of car accidents", col = "orange")
+```
+
+From this plot, we can see how most of the observations in our sample see a total number of car accidents within the hour to be 3-4, which is in line with the average number already mentioned. There are missing values for 6 and 7, and finally in 3 instances there were 8 total car accidents.
+
+```{r}
+mean(table(mydata$car_accidents))
+```
+
+Moreover, we observe a mean number of car accidents in our sample (3.17) that is different from the known average number of 3.22
+
+### Point 2
+
+Now that we are more familiar with the data we will be working with, let's identify our ingredients for the Bayesian model.
+
+We know that the car accidents $Y_i$ have a Poisson distribution with unknown parameter $\theta$, as that is a given in the exercise. Moreover, the Poisson distribution is usually used to describe the aleatory number of events in a given time frame, which is indeed in line with our setup.
+
+Secondly, we want a suitable prior distribution such that it is conjugate for the Poisson sampling model - that is, the posterior distribution is also in the same distribution class. As a consequence, this prior distribution for the parameter $\theta$ can be interpreted as a Gamma distribution with unknown parameters $r$ and $s$.
+
+As a final note, the posterior predictive distribution given the previous "ingredients" will be a Negative Binomial distribution, which can be shown through calculations.
+
+### Point 3
+
+#### 3.a
+
+We can finally proceed with out bayesian analysis. As a first step, we want to get point estimates. In order to do this, we have to find the posterior distribution of $\theta$. Given what has been said in the previous points, we can conclude that the conjugate posterior for $\theta$ will be a Gamma distribution with updated parameters $s+\sum_{i = 1}^{n}y_i$ and $r+n$.
+
+Naturally, before getting this posterior distribution, we need to identify proper values for $s$ and $r$ in the prior distribution. This could be done by choosing random values, or values such that the overall shape of distribution has some desired properties. Since we already know that the average number of car accidents is 3.22, we can exploit this knowledge by calculating the optimal values for s and r such that the value for the mean is equal to 3.22 and that of the variance is a value of our choice (for example 1). 
+
+As a result we get a system of two equations with two unknown values, which returns the following values: $r=3.22$ and $s=10.37$. Using these as our initial values for the parameters the following prior distribution emerges:
+
+```{r}
+r <- 3.22
+s <- 10.37
+
+curve(dgamma(x, shape=s, rate=r), 0, 10, n=1000, col="orange", main = expression(paste("Prior distribution of ",theta)), ylab=expression(paste("p(",theta,")")), xlab=expression(theta))
+```
+
+Afterwards, we want to plug-in the data at our disposal to obtain the posterior distribution. We update the parameters as follows:
+
+```{r}
+y_obs <- mydata$car_accidents
+
+new_r <- r+length(y_obs)
+new_s <- s+sum(y_obs)
+```
+
+So, $new_s$ and $new_r$ will be our parameters for the posterior Gamma distribution. Given the initial values for s and r and their updated counterparts, we can compute the values for the mean and variance obtained in the two cases, to compare them. Since we know that for a Gamma distribution the expectation of the variable is = $s/r$ and that the variance is = $s/r^2$:
+
+```{r}
+prior_exp <- s/r
+prior_variance <- s/(r^2)
+
+post_exp <- new_s/new_r
+post_variance <- new_s/(new_r^2)
+
+results <- c(prior_exp, prior_variance, post_exp, post_variance)
+results
+```
+
+As can be seen from the results above, plugging in the data drastically improves our confidence in our result, since the variance drops from 1.00 to 0.17. This is because, having learned from observed data, not only can we improve our guess for the mean, but we can sharply increase our confidence in the guess itself. Moreover, the bigger the sample, the more the posterior expectation will be influenced by the sample average rather than the prior expectation. (a graphic representation of the two is provided in a later point)
+
+The posterior expectation `post_mean` is a point estimate for the number of car accidents $\theta$. We can also compute the mode and the median of the distribution as further point estimates.
+
+```{r}
+post_mode <- (new_s-1)/new_r
+post_mode
+post_median <- qgamma(0.5, shape=new_s, rate=new_r)
+post_median
+```
+
+#### 3.b
+
+As measure of the posterior uncertainty for a new sample of the population we can consider the posterior predictive variance. This is where the Negative Binomial distribution comes into play. Given the set up we have been working in, the posterior predictive variance is the product of the posterior expectation found in the point above and $\frac{r+n+1}{r+n}$.
+
+```{r}
+post_pred_var <- post_exp*(new_r+1)/new_r
+post_pred_var
+```
+
+The posterior uncertainty derives from uncertainty about the general population and the variability in sampling. For this reason this can be computed as the variance of the posterior predictive distribution, which is related to both the sample and the predictive population (as knowledge on the true population is always off-limits).
+
+#### 3.c
+
+For the interval estimate, we can simply use the quartile-based 95% interval, which will have values:
+
+```{r}
+qgamma(c(.025,.975), new_s, new_r)
+```
+
+This interval includes both the average number of car accidents 3.22 and our mean point estimate 3.80. In addition, we can also plot the interval with the function to have a more visual understanding:
+
+```{r}
+curve(dgamma(x, rate=new_r, shape=new_s), from=0, to=10, 1000, col="turquoise", main=expression(paste("Posterior distribution of ", theta)), ylab=expression(paste("p(",theta,")")), xlab=expression(theta))
+abline(v=qgamma(c(.025,.975), new_s, new_r), pch=16, col="blue", lty="dashed")
+legend(8, .9, legend=c("Posterior", "CI"), col=c("turquoise", "blue"), cex=.8, lty=1:2)
+```
+
+#### 3.d
+
+Finally, to properly show the difference between the prior and the posterior distributions, we plot them together:
+
+```{r}
+curve(dgamma(x, rate=r, shape=s), from=0, to=10, xlab=expression(theta), ylab=expression(paste("p(",theta,")")), 1000, ylim=c(0,1), col="orange", main="Prior and Posterior Distributions")
+curve(dgamma(x, rate=new_r, shape=new_s), from=0, to=10, 1000, add=TRUE, col="turquoise")
+legend(8, 1, legend=c("Prior", "Posterior"), col=c("orange","turquoise"), cex=.8, lty=1:1)
+```
+
+We can see here how the posterior distribution is much more heavily centered on the mean. Again, this is because, having observed the data, our confidence in the guess is more certain.
+
+#### 3.e 
+
+As said above, the posterior predictive distribution is a Negative Binomial distribution with parameters $(r_{new}, s_{new})$. We can compare it with the actual observed data through another plot.
+
+```{r}
+par(mfrow=c(1,2))
+support <- 0:10
+plot(dnbinom(support, size=new_s, mu=new_s/new_r), type="h", ylim=c(0,.35), xlim=c(0,10), col="orchid", ylab=expression(paste("p(",theta,")")), xlab=expression(theta),
+     main="Predictive", lwd=.8)
+plot(table(y_obs)/length(y_obs), type="h",  ylim=c(0,.35), xlim=c(0,10), col="orange", ylab=expression(paste("p(",theta,")")), xlab=expression(theta),
+     main="Observations", lwd=.8)
+```
+
+Comparing the two, it seems that the actual observed data is very heavily centered on certain values (3, 4 and 8), while the future observable seems to be much more distributed among the different values. This makes sense, since our observations are very limited (our sample was only 19 units), and therefore much less likely to follow an actual distribution. We expect that a bigger sample would have a shape more similar to the one shown in the predictive posterior distribution.
+
+# Bulb lifetime
+
+Our given sample consists of 20 observations of the lifetime of bulbs as follows:
+
+```{r}
+y_obs <- rev(c(1, 13, 27, 43, 73, 75, 154, 196, 220, 297, 344, 610, 734, 783, 796, 845, 859, 992, 1066, 1471))
+y_avg <- mean(y_obs)
+plot(y_obs, cex=.8, pch=16, col="turquoise", main="Data", ylab="bulb lifetime in hours", xlab="unit")
+abline(h=y_avg, cex=.8, pch=16, col="orange", lty="dashed")
+```
+
+Where the dashed line represents the mean.
+
+Being this the "survival" of the bulbs, it comes as no surprise that $Y_{obs}$ can be modelled as an Exponential distribution with parameter $\theta$, where $\psi=\frac{1}{\theta}$ is the average lifetime. The data in the plot above has been reversed (from longest lifetime to shortest) to show its exponential shape.
+
+### Point 1
+
+The first ingredient of our Bayesian model is the above mentioned Exponential distribution, which is conditioned on $\theta$.
+
+So as a second step, as we did for the previous exercise, we find a distribution for $\theta$ such that it is conjugate for the Exponential sampling model. Once again, we find that the Gamma distribution is conjugate prior for such a model.
+
+### Point 2
+
+We now choose the parameters of the conjugate prior such that the mean is equal to 0.003 and the standard deviation is 0.00173. Since we know that for a Gamma distribution of parameters $s$ and $r$ the mean is $\frac{s}{r}$ and the standard deviation is $\sqrt{\frac{s}{r^2}}$ we have to simply solve a system such that both of these requirements are fulfilled. The result is:
+
+```{r}
+s <- 3.01
+r <- 1002.37
+curve(dgamma(x, rate=r, shape=s), from=0, to=.01, 1000, col="turquoise", main="Prior conjugate distribution", ylab=expression(paste("p(",theta,")")), xlab=expression(theta))
+abline(v=.003, col="orange", lty="dashed")
+legend(.007, 250, legend=c("Gamma distribution", "Mean value"), col=c("turquoise", "orange"), cex=.8, lty=1:2)
+```
+
+### Point 3
+
+Without any actual observations to use as a jumping point for our prior distribution, we can only provide a vague guess. Usually, previous studies on the same event can be used as a starting point to define the prior parameters, with the input from actual observations still being a valuable asset to our guesses.
+
+In this case, without a solid explanation as to where the values for the mean and standard deviation came from, we are left to believe that they are quite arbitrary values. As a result, the prior opinion is pretty vague. The choice of prior parameters is of great importance, because when the prior hypothesis is very strong there's not a lot of space to learn from data and so the prior distribution influences too heavily the final conclusions.
+
+### Point 4
+
+In order to show that this setup does fit into the framework of conjugate Bayesian analysis we have to show that $p(\theta)$ is in the same form as $p(\theta|y)$. Given than $\theta$ has a Gamma distribution and that $y$ has an Exponential distribution, the distribution of $p(\theta|y)$ will be a Gamma distribution with parameters $s+n$ and $r+\sum{y_i}$. Proof:
+
+\begin{align}
+p(\theta|y_1,...,y_n)\propto p(\theta)\times p(y_1,...,y_n|\theta)
+=\frac{r^{s}}{\Gamma(s)}\theta^{s-1}e^{-r\theta}\times \theta^{n} e^{-\theta\sum{y_i}}\\
+\propto c(y) \times \theta^{s+n-1} \times e^{-\theta(r+\sum{y_i})}
+\end{align}
+
+Which is indeed the pdf of a Gamma$(s+n, r+\sum{y_i})$ distribution.
+
+### Point 5
+
+Since previously we have found the initial parameters $s$ and $r$ to be respectively 3.01 and 1002.37, we can now use them together with the data to derive the posterior conjugate distribution.
+
+```{r}
+s_new <- s+length(y_obs)
+r_new <- r+sum(y_obs)
+curve(dgamma(x, rate=r, shape=s), from=0, to=.01, 1000, ylim=c(0,1000), col="turquoise", main="Comparing Prior and Posterior conjugate distributions", ylab=expression(paste("p(",theta,")")), xlab=expression(theta))
+curve(dgamma(x, rate=r_new, shape=s_new), from=0, to=.01, 1000, col="orange", add=TRUE)
+legend(.008, 1000, legend=c("Prior", "Posterior"), col=c("turquoise", "orange"), cex=.8, lty=1:1)
+```
+
+We find that, having plugged in the data we learned from our observation, the certainty in our guess for the parameter increases: the distribution is much more centered on the expected value and less sparse. We can also show this with numbers:
+
+```{r}
+e_prior <- s/r
+v_prior <- s/(r^2)
+e_prior
+v_prior
+e_post <- s_new/r_new
+v_post <- s_new/(r_new^2)
+e_post
+v_post
+```
+
+Our best guess for the parameter $\theta$ is now 0.00217 and the variance is much smaller too. We can see that, given that the expected lifetime of a bulb is $\frac{1}{\theta}$, this results in:
+
+```{r}
+e_lifetime <- 1/e_post
+e_lifetime
+```
+
+So our expectation for the lifetime of a bulb is now 460.73 hours.
+
+### Point 6
+
+To check the probability that $\psi=\frac{1}{\theta}>550$ means to check that $\theta>\frac{1}{550}$.
+
+```{r}
+1 - pgamma(1/550, rate=r_new, shape=s_new)
+```
+
+The probability of the lifetime of a random bulb to exceed 550 hours is 0.77.
